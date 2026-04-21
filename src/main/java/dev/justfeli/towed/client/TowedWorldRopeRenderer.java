@@ -7,7 +7,6 @@ import dev.ryanhcode.sable.api.math.OrientedBoundingBox3d;
 import dev.simulated_team.simulated.content.blocks.rope.strand.client.ClientRopePoint;
 import dev.simulated_team.simulated.index.SimPartialModels;
 import dev.simulated_team.simulated.util.SimMathUtils;
-import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 import net.createmod.catnip.render.CachedBuffers;
 import net.createmod.catnip.render.SuperByteBuffer;
 import net.minecraft.client.Minecraft;
@@ -19,11 +18,13 @@ import net.minecraft.core.Direction;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Quaternionf;
 import org.joml.Vector3d;
-import org.joml.Vector3dc;
 
 import java.util.List;
 
 public final class TowedWorldRopeRenderer {
+    private static final Vector3d UP_AXIS = new Vector3d(0, 1, 0);
+    private static final Vector3d DOWN_AXIS = new Vector3d(0, -1, 0);
+
     private TowedWorldRopeRenderer() {
     }
 
@@ -50,91 +51,103 @@ public final class TowedWorldRopeRenderer {
                 continue;
             }
 
-            final ObjectArrayList<RopeRenderPoint> renderPoints = buildRenderPoints(partialTick, points);
-            if (renderPoints.isEmpty()) {
+            final int firstSegmentIndex = findFirstRenderableSegment(points);
+            if (firstSegmentIndex < 0) {
                 continue;
             }
 
-            for (int i = 1; i < renderPoints.size(); i++) {
-                final RopeRenderPoint point0 = renderPoints.get(i - 1);
-                final RopeRenderPoint point1 = renderPoints.get(i);
-                final Vector3d globalRenderPos = new Vector3d(point0.position());
-                final Quaternionf orientation = new Quaternionf(point0.orientation());
-                final double length = point1.position().distance(point0.position());
-
-                poseStack.pushPose();
-                poseStack.translate(globalRenderPos.x - cameraPos.x, globalRenderPos.y - cameraPos.y, globalRenderPos.z - cameraPos.z);
-                poseStack.mulPose(orientation);
-                poseStack.translate(-0.5, -0.5, -0.5);
-
-                final int worldLight = LevelRenderer.getLightColor(minecraft.level, BlockPos.containing(globalRenderPos.x, globalRenderPos.y, globalRenderPos.z));
-                if (i > 1) {
-                    knot.light(worldLight).renderInto(poseStack, vertexConsumer);
-                }
-
-                poseStack.translate(0.0, 0.5, 0.0);
-                poseStack.scale(1.0f, (float) length, 1.0f);
-                middle.light(worldLight).renderInto(poseStack, vertexConsumer);
-                poseStack.popPose();
-            }
+            renderRopeSegments(minecraft, poseStack, cameraPos, points, partialTick, firstSegmentIndex, knot, middle, vertexConsumer);
         }
         poseStack.popPose();
 
         bufferSource.endBatch(RenderType.solid());
     }
 
-    private static ObjectArrayList<RopeRenderPoint> buildRenderPoints(final float partialTick, final List<ClientRopePoint> inputPoints) {
-        final ObjectArrayList<RopeRenderPoint> ropeRenderPoints = new ObjectArrayList<>();
-        final ObjectArrayList<ClientRopePoint> points = new ObjectArrayList<>(inputPoints);
-
-        while (points.size() >= 2 && points.getFirst().position().distanceSquared(points.get(1).position()) < 1e-3) {
-            points.removeFirst();
+    private static int findFirstRenderableSegment(final List<ClientRopePoint> points) {
+        int firstSegmentIndex = 0;
+        while (firstSegmentIndex + 1 < points.size()
+                && points.get(firstSegmentIndex).position().distanceSquared(points.get(firstSegmentIndex + 1).position()) < 1.0E-3) {
+            firstSegmentIndex++;
         }
-
-        if (points.size() <= 1) {
-            return ropeRenderPoints;
-        }
-
-        final Vector3dc pointZeroPosition = points.get(0).renderPos(partialTick, new Vector3d());
-        final Vector3dc pointOnePosition = points.get(1).renderPos(partialTick, new Vector3d());
-        final Vector3d normal = pointOnePosition.sub(pointZeroPosition, new Vector3d()).normalize();
-
-        final Quaternionf runningRotation;
-        if (normal.dot(OrientedBoundingBox3d.UP) < 0) {
-            runningRotation = SimMathUtils.getQuaternionfFromVectorRotation(new Vector3d(0, -1, 0), normal);
-            runningRotation.rotateZ((float) Math.PI);
-        } else {
-            runningRotation = SimMathUtils.getQuaternionfFromVectorRotation(new Vector3d(0, 1, 0), normal);
-        }
-
-        ropeRenderPoints.add(new RopeRenderPoint(new Quaternionf(runningRotation), new Vector3d(pointZeroPosition)));
-
-        final Vector3d runningNormal = new Vector3d();
-        final Vector3d bPos = new Vector3d();
-        final Vector3d aPos = new Vector3d();
-
-        for (int i = 2; i < points.size(); i++) {
-            final ClientRopePoint pointA = points.get(i - 1);
-            final ClientRopePoint pointB = points.get(i);
-
-            runningNormal.set(pointB.renderPos(partialTick, bPos))
-                    .sub(pointA.renderPos(partialTick, aPos))
-                    .normalize();
-
-            if (runningNormal.dot(OrientedBoundingBox3d.UP) < -0.15) {
-                runningRotation.set(SimMathUtils.getQuaternionfFromVectorRotation(new Vector3d(0, -1, 0), runningNormal));
-                runningRotation.rotateZ((float) Math.PI);
-            } else {
-                runningRotation.set(SimMathUtils.getQuaternionfFromVectorRotation(new Vector3d(0, 1, 0), runningNormal));
-            }
-
-            ropeRenderPoints.add(new RopeRenderPoint(new Quaternionf(runningRotation), pointA.renderPos(partialTick, new Vector3d())));
-        }
-
-        ropeRenderPoints.add(new RopeRenderPoint(new Quaternionf(runningRotation), points.getLast().renderPos(partialTick, new Vector3d())));
-        return ropeRenderPoints;
+        return firstSegmentIndex + 1 < points.size() ? firstSegmentIndex : -1;
     }
 
-    private record RopeRenderPoint(Quaternionf orientation, Vector3d position) {
+    private static void renderRopeSegments(final Minecraft minecraft,
+                                           final PoseStack poseStack,
+                                           final Vec3 cameraPos,
+                                           final List<ClientRopePoint> points,
+                                           final float partialTick,
+                                           final int firstSegmentIndex,
+                                           final SuperByteBuffer knot,
+                                           final SuperByteBuffer middle,
+                                           final VertexConsumer vertexConsumer) {
+        final Vector3d segmentStart = new Vector3d();
+        final Vector3d segmentEnd = new Vector3d();
+        final Vector3d segmentNormal = new Vector3d();
+        final Quaternionf orientation = new Quaternionf();
+
+        points.get(firstSegmentIndex).renderPos(partialTick, segmentStart);
+
+        for (int i = firstSegmentIndex + 1; i < points.size(); i++) {
+            points.get(i).renderPos(partialTick, segmentEnd);
+            segmentNormal.set(segmentEnd).sub(segmentStart);
+            final double length = segmentNormal.length();
+            if (length <= 1.0E-4) {
+                segmentStart.set(segmentEnd);
+                continue;
+            }
+
+            segmentNormal.div(length);
+            updateOrientation(orientation, segmentNormal);
+            renderSegment(
+                    minecraft,
+                    poseStack,
+                    cameraPos,
+                    segmentStart,
+                    orientation,
+                    length,
+                    i > firstSegmentIndex + 1,
+                    knot,
+                    middle,
+                    vertexConsumer
+            );
+            segmentStart.set(segmentEnd);
+        }
+    }
+
+    private static void updateOrientation(final Quaternionf orientation, final Vector3d normal) {
+        if (normal.dot(OrientedBoundingBox3d.UP) < -0.15) {
+            orientation.set(SimMathUtils.getQuaternionfFromVectorRotation(DOWN_AXIS, normal));
+            orientation.rotateZ((float) Math.PI);
+            return;
+        }
+
+        orientation.set(SimMathUtils.getQuaternionfFromVectorRotation(UP_AXIS, normal));
+    }
+
+    private static void renderSegment(final Minecraft minecraft,
+                                      final PoseStack poseStack,
+                                      final Vec3 cameraPos,
+                                      final Vector3d globalRenderPos,
+                                      final Quaternionf orientation,
+                                      final double length,
+                                      final boolean renderKnot,
+                                      final SuperByteBuffer knot,
+                                      final SuperByteBuffer middle,
+                                      final VertexConsumer vertexConsumer) {
+        poseStack.pushPose();
+        poseStack.translate(globalRenderPos.x - cameraPos.x, globalRenderPos.y - cameraPos.y, globalRenderPos.z - cameraPos.z);
+        poseStack.mulPose(orientation);
+        poseStack.translate(-0.5, -0.5, -0.5);
+
+        final int worldLight = LevelRenderer.getLightColor(minecraft.level, BlockPos.containing(globalRenderPos.x, globalRenderPos.y, globalRenderPos.z));
+        if (renderKnot) {
+            knot.light(worldLight).renderInto(poseStack, vertexConsumer);
+        }
+
+        poseStack.translate(0.0, 0.5, 0.0);
+        poseStack.scale(1.0f, (float) length, 1.0f);
+        middle.light(worldLight).renderInto(poseStack, vertexConsumer);
+        poseStack.popPose();
     }
 }

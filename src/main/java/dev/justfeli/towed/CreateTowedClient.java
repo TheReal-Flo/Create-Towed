@@ -14,6 +14,5 @@ public class CreateTowedClient {
     public CreateTowedClient(final IEventBus modEventBus, final ModContainer container) {
         container.registerExtensionPoint(IConfigScreenFactory.class, ConfigurationScreen::new);
         NeoForge.EVENT_BUS.register(TowedClientEvents.class);
-        TowedClientEvents.init();
     }
 }

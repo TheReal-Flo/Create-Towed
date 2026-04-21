@@ -1,15 +1,10 @@
 package dev.justfeli.towed.client;
-
-import dev.justfeli.towed.CreateTowed;
 import net.neoforged.bus.api.SubscribeEvent;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.client.event.RenderLevelStageEvent;
 
 public final class TowedClientEvents {
     private TowedClientEvents() {
-    }
-
-    public static void init() {
     }
 
     @SubscribeEvent

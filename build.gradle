@@ -149,6 +149,8 @@ configurations {
 }
 
 dependencies {
+    compileOnly("dev.ryanhcode.sable:sable-neoforge-1.21.1:1.0.6")
+    compileOnly("dev.ryanhcode.sable-companion:sable-companion-common-1.21.1:1.4.2")
     compileOnly("dev.simulated_team.simulated:simulated-neoforge-1.21.1:1.0.3")
     compileOnly("foundry.veil:veil-neoforge-1.21.1:3.6.2") {
         exclude group: "maven.modrinth"

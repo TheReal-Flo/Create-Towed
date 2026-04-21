@@ -77,7 +77,7 @@ public final class TowRopeSavedData extends SavedData {
         return data;
     }
 
-    public boolean tryCreate(final BlockPos blockPos, final UUID entityId, final @Nullable net.minecraft.world.entity.player.Player player) {
+    public boolean tryCreate(final BlockPos blockPos, final UUID entityId) {
         final Entity entity = this.level.getEntity(entityId);
         if (entity == null || !entity.isAlive() || !TowAnchorPoints.isTowBlockAttachment(this.level, blockPos)) {
             return false;
@@ -142,8 +142,14 @@ public final class TowRopeSavedData extends SavedData {
         return removed;
     }
 
-    public boolean removeByHandle(final BlockPos handlePos, final boolean dropItem) {
-        return this.removeByBlock(handlePos, dropItem);
+    public boolean hasEntityAttachment(final UUID entityId) {
+        for (final ServerTowRope rope : this.ropes.values()) {
+            if (rope.matchesEntity(entityId)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public void physicsTick(final SubLevelPhysicsSystem physicsSystem, final double timeStep) {
@@ -180,6 +186,8 @@ public final class TowRopeSavedData extends SavedData {
                 continue;
             }
 
+            rope.physicsTick(this.level, timeStep);
+
             if (!rope.isActive()) {
                 if (physicsSystem.getTicketManager().wouldBeLoaded(this.level, rope)) {
                     physicsSystem.addObject(rope);
@@ -214,7 +222,13 @@ public final class TowRopeSavedData extends SavedData {
             }
 
             final ClientboundTowRopeDataPacket packet =
-                    new ClientboundTowRopeDataPacket(interpolationTick, rope.ropeId(), rope.startAttachment(), rope.endAttachment(), rope.getPoints().stream().map(Vector3d::new).toList());
+                    new ClientboundTowRopeDataPacket(
+                            interpolationTick,
+                            rope.ropeId(),
+                            rope.startAttachment(),
+                            rope.endAttachment(),
+                            copyPoints(rope.getPoints())
+                    );
 
             for (final ServerPlayer player : trackingPlayers) {
                 VeilPacketManager.player(player).sendPacket(packet);
@@ -255,11 +269,11 @@ public final class TowRopeSavedData extends SavedData {
         }
     }
 
-    private Collection<ServerPlayer> getTrackingPlayers(final @Nullable BlockPos handlePos) {
-        if (handlePos == null) {
+    private Collection<ServerPlayer> getTrackingPlayers(final @Nullable BlockPos blockPos) {
+        if (blockPos == null) {
             return List.of();
         }
-        return this.level.getChunkSource().chunkMap.getPlayers(new ChunkPos(handlePos), false);
+        return this.level.getChunkSource().chunkMap.getPlayers(new ChunkPos(blockPos), false);
     }
 
     private void dropCoupling(final ServerTowRope rope) {
@@ -277,6 +291,14 @@ public final class TowRopeSavedData extends SavedData {
         }
 
         this.level.addFreshEntity(new ItemEntity(this.level, dropPoint.x, dropPoint.y, dropPoint.z, new ItemStack(SimItems.ROPE_COUPLING.get())));
+    }
+
+    private static List<Vector3d> copyPoints(final List<Vector3d> points) {
+        final List<Vector3d> copiedPoints = new ArrayList<>(points.size());
+        for (final Vector3d point : points) {
+            copiedPoints.add(new Vector3d(point));
+        }
+        return copiedPoints;
     }
 
     @Override

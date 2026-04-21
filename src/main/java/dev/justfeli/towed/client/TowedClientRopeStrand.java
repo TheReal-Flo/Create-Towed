@@ -16,14 +16,30 @@ import org.joml.Vector3d;
 import java.util.UUID;
 
 public final class TowedClientRopeStrand extends ClientRopeStrand {
+    private static final long ENTITY_LOOKUP_RETRY_TICKS = 10L;
+
     private @Nullable TowRopeAttachment startAttachment;
     private @Nullable TowRopeAttachment endAttachment;
+    private @Nullable Entity cachedStartEntity;
+    private @Nullable Entity cachedEndEntity;
+    private long nextStartEntityLookupTick;
+    private long nextEndEntityLookupTick;
 
     public TowedClientRopeStrand(final UUID uuid) {
         super(uuid);
+        this.nextStartEntityLookupTick = 0L;
+        this.nextEndEntityLookupTick = 0L;
     }
 
     public void setAttachments(final TowRopeAttachment startAttachment, final TowRopeAttachment endAttachment) {
+        if (!startAttachment.equals(this.startAttachment)) {
+            this.cachedStartEntity = null;
+            this.nextStartEntityLookupTick = 0L;
+        }
+        if (!endAttachment.equals(this.endAttachment)) {
+            this.cachedEndEntity = null;
+            this.nextEndEntityLookupTick = 0L;
+        }
         this.startAttachment = startAttachment;
         this.endAttachment = endAttachment;
     }
@@ -31,10 +47,6 @@ public final class TowedClientRopeStrand extends ClientRopeStrand {
     public void tickTowInterpolation(final Level level, final double interpolationTick) {
         this.tickInterpolation(interpolationTick);
         this.anchorEndpoints(level);
-    }
-
-    public boolean startsAtHandle(final BlockPos handlePos) {
-        return this.startAttachment != null && this.startAttachment.matchesBlock(handlePos);
     }
 
     public boolean shouldDiscard(final Level level) {
@@ -46,14 +58,14 @@ public final class TowedClientRopeStrand extends ClientRopeStrand {
             return;
         }
 
-        final Vector3d startPointPosition = this.resolveAttachmentPoint(level, this.startAttachment);
+        final Vector3d startPointPosition = this.resolveAttachmentPoint(level, this.startAttachment, true);
         if (startPointPosition != null) {
             final ClientRopePoint startPoint = this.getPoints().getFirst();
             startPoint.position().set(startPointPosition);
             startPoint.previousPosition().set(startPointPosition);
         }
 
-        final Vector3d endPointPosition = this.resolveAttachmentPoint(level, this.endAttachment);
+        final Vector3d endPointPosition = this.resolveAttachmentPoint(level, this.endAttachment, false);
         if (endPointPosition != null) {
             final ClientRopePoint endPoint = this.getPoints().getLast();
             endPoint.position().set(endPointPosition);
@@ -68,7 +80,9 @@ public final class TowedClientRopeStrand extends ClientRopeStrand {
                 && !TowAnchorPoints.isTowBlockAttachment(level, attachment.blockPos());
     }
 
-    private @Nullable Vector3d resolveAttachmentPoint(final Level level, final @Nullable TowRopeAttachment attachment) {
+    private @Nullable Vector3d resolveAttachmentPoint(final Level level,
+                                                      final @Nullable TowRopeAttachment attachment,
+                                                      final boolean startSide) {
         if (attachment == null) {
             return null;
         }
@@ -76,7 +90,7 @@ public final class TowedClientRopeStrand extends ClientRopeStrand {
             return this.resolveBlockPoint(level, attachment.blockPos());
         }
         if (attachment.isEntity()) {
-            return this.resolveEntityPoint(level, attachment.entityId());
+            return this.resolveEntityPoint(level, attachment.entityId(), startSide);
         }
         return null;
     }
@@ -90,7 +104,18 @@ public final class TowedClientRopeStrand extends ClientRopeStrand {
         return new Vector3d(projected.x, projected.y, projected.z);
     }
 
-    private @Nullable Vector3d resolveEntityPoint(final Level level, final UUID entityId) {
+    private @Nullable Vector3d resolveEntityPoint(final Level level, final UUID entityId, final boolean startSide) {
+        final Entity cachedEntity = startSide ? this.cachedStartEntity : this.cachedEndEntity;
+        if (this.isUsableCachedEntity(level, cachedEntity, entityId)) {
+            return this.projectEntityPoint(level, cachedEntity);
+        }
+
+        final long gameTime = level.getGameTime();
+        final long nextLookupTick = startSide ? this.nextStartEntityLookupTick : this.nextEndEntityLookupTick;
+        if (gameTime < nextLookupTick) {
+            return null;
+        }
+
         final BlockPos searchOrigin = this.resolveSearchOrigin();
         if (searchOrigin == null) {
             return null;
@@ -102,10 +127,34 @@ public final class TowedClientRopeStrand extends ClientRopeStrand {
                 .stream()
                 .findFirst()
                 .orElse(null);
-        if (entity == null || !entity.isAlive()) {
+        if (!this.isUsableCachedEntity(level, entity, entityId)) {
+            this.cacheEntity(startSide, null, gameTime + ENTITY_LOOKUP_RETRY_TICKS);
             return null;
         }
 
+        this.cacheEntity(startSide, entity, gameTime + ENTITY_LOOKUP_RETRY_TICKS);
+        return this.projectEntityPoint(level, entity);
+    }
+
+    private boolean isUsableCachedEntity(final Level level, final @Nullable Entity entity, final UUID entityId) {
+        return entity != null
+                && entity.isAlive()
+                && entity.level() == level
+                && entityId.equals(entity.getUUID());
+    }
+
+    private void cacheEntity(final boolean startSide, final @Nullable Entity entity, final long nextLookupTick) {
+        if (startSide) {
+            this.cachedStartEntity = entity;
+            this.nextStartEntityLookupTick = nextLookupTick;
+            return;
+        }
+
+        this.cachedEndEntity = entity;
+        this.nextEndEntityLookupTick = nextLookupTick;
+    }
+
+    private Vector3d projectEntityPoint(final Level level, final Entity entity) {
         final net.minecraft.world.phys.Vec3 projected = Sable.HELPER.projectOutOfSubLevel(level, TowAnchorPoints.resolveEntityTowPoint(entity));
         return new Vector3d(projected.x, projected.y, projected.z);
     }

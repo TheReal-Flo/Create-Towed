@@ -6,7 +6,6 @@ import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap;
 import it.unimi.dsi.fastutil.objects.ObjectArrayList;
 import net.createmod.catnip.data.WorldAttached;
 import net.minecraft.client.multiplayer.ClientLevel;
-import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.LevelAccessor;
 import org.jetbrains.annotations.Nullable;
@@ -57,16 +56,6 @@ public final class ClientTowRopeManager {
 
     public void remove(final UUID ropeId) {
         this.ropes.remove(ropeId);
-    }
-
-    public Iterable<TowedClientRopeStrand> getForHandle(final BlockPos handlePos) {
-        final ObjectArrayList<TowedClientRopeStrand> ropesForHandle = new ObjectArrayList<>();
-        for (final TowedClientRopeStrand rope : this.ropes.values()) {
-            if (rope.startsAtHandle(handlePos)) {
-                ropesForHandle.add(rope);
-            }
-        }
-        return ropesForHandle;
     }
 
     public Iterable<TowedClientRopeStrand> getAll() {

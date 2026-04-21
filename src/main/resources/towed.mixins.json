@@ -2,7 +2,9 @@
   "required": true,
   "package": "dev.justfeli.towed.mixin",
   "compatibilityLevel": "JAVA_21",
-  "mixins": [],
+  "mixins": [
+    "FollowOwnerGoalMixin"
+  ],
   "client": [
     "client.ClientSubLevelContainerTowRopeMixin"
   ],

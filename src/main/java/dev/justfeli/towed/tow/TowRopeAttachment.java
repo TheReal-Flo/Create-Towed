@@ -30,10 +30,6 @@ public record TowRopeAttachment(Type type, @Nullable BlockPos blockPos, @Nullabl
         return new TowRopeAttachment(Type.BLOCK, blockPos.immutable(), null);
     }
 
-    public static TowRopeAttachment handleBlock(final BlockPos blockPos) {
-        return block(blockPos);
-    }
-
     public static TowRopeAttachment entity(final UUID entityId) {
         return new TowRopeAttachment(Type.ENTITY, null, entityId);
     }
@@ -42,20 +38,12 @@ public record TowRopeAttachment(Type type, @Nullable BlockPos blockPos, @Nullabl
         return this.type == Type.BLOCK && this.blockPos != null;
     }
 
-    public boolean isHandleBlock() {
-        return this.isBlock();
-    }
-
     public boolean isEntity() {
         return this.type == Type.ENTITY && this.entityId != null;
     }
 
     public boolean matchesBlock(final BlockPos blockPos) {
         return this.isBlock() && this.blockPos.equals(blockPos);
-    }
-
-    public boolean matchesHandle(final BlockPos handlePos) {
-        return this.matchesBlock(handlePos);
     }
 
     public boolean matchesEntity(final UUID entityId) {
@@ -81,9 +69,6 @@ public record TowRopeAttachment(Type type, @Nullable BlockPos blockPos, @Nullabl
         }
 
         private static Type byName(final String name) {
-            if ("handle_block".equals(name)) {
-                return BLOCK;
-            }
             for (final Type value : values()) {
                 if (value.serializedName.equals(name)) {
                     return value;

@@ -31,6 +31,11 @@ public final class TowedNeoForgeCommonEvents {
     }
 
     @SubscribeEvent
+    public static void onEntityInteractSpecific(final PlayerInteractEvent.EntityInteractSpecific event) {
+        TowedInteractionHandler.handleEntityInteract(event);
+    }
+
+    @SubscribeEvent
     public static void onRightClickItem(final PlayerInteractEvent.RightClickItem event) {
         TowedInteractionHandler.handleRightClickItem(event);
     }

@@ -21,9 +21,18 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.util.Mth;
 import org.jetbrains.annotations.Nullable;
 
 public final class TowedConnectionPreviewHandler {
+    private static final long ENTITY_LOOKUP_RETRY_TICKS = 10L;
+    private static final long PARTICLE_SPAWN_INTERVAL_TICKS = 4L;
+    private static final int MAX_PREVIEW_POINTS = 12;
+
+    private static @Nullable java.util.UUID cachedPendingEntityId;
+    private static @Nullable Entity cachedPendingEntity;
+    private static long nextPendingEntityLookupTick;
+
     private TowedConnectionPreviewHandler() {
     }
 
@@ -44,13 +53,16 @@ public final class TowedConnectionPreviewHandler {
                 continue;
             }
 
-            renderPreview(minecraft.level, pending, minecraft.hitResult);
+            renderPreview(minecraft.level, minecraft.player.position(), pending, minecraft.hitResult);
             return;
         }
     }
 
-    private static void renderPreview(final Level level, final PendingTowEndpoint pending, final @Nullable HitResult hitResult) {
-        final Vec3 firstPoint = resolvePendingPoint(level, pending);
+    private static void renderPreview(final Level level,
+                                      final Vec3 searchCenter,
+                                      final PendingTowEndpoint pending,
+                                      final @Nullable HitResult hitResult) {
+        final Vec3 firstPoint = resolvePendingPoint(level, searchCenter, pending);
         if (firstPoint == null) {
             return;
         }
@@ -96,46 +108,64 @@ public final class TowedConnectionPreviewHandler {
                     .lineWidth(1 / 3f)
                     .disableLineNormals();
 
-            final int points = (int) Math.floor(globalFirstPoint.distanceTo(globalTarget));
-            if (points > 0) {
-                final Vec3 backwardsDiff = globalFirstPoint.subtract(globalTarget).normalize();
-                for (int i = 0; i < points; i++) {
-                    final Vec3 point = globalTarget.add(backwardsDiff.scale(i));
-                    Outliner.getInstance().chaseAABB("TowedRopePreviewPoint" + i, new AABB(point, point))
-                            .colored(color)
-                            .lineWidth(1 / 8f)
-                            .disableLineNormals();
-                }
+            final int points = Mth.clamp(Mth.ceil((float) (globalFirstPoint.distanceTo(globalTarget) * 0.5)), 1, MAX_PREVIEW_POINTS);
+            for (int i = 0; i < points; i++) {
+                final double lerpDelta = points == 1 ? 0.5 : i / (double) (points - 1);
+                final Vec3 point = globalFirstPoint.lerp(globalTarget, lerpDelta);
+                Outliner.getInstance().chaseAABB("TowedRopePreviewPoint" + i, new AABB(point, point))
+                        .colored(color)
+                        .lineWidth(1 / 8f)
+                        .disableLineNormals();
             }
         }
 
-        final int particles = 4;
-        for (int i = 0; i < particles; i++) {
-            final Vec3 point = globalFirstPoint.lerp(globalTarget, level.random.nextFloat());
-            level.addParticle(
-                    new net.minecraft.core.particles.DustParticleOptions(color.asVectorF(), 1),
-                    point.x, point.y, point.z,
-                    0, 0, 0
-            );
+        if (level.getGameTime() % PARTICLE_SPAWN_INTERVAL_TICKS == 0L) {
+            final int particles = 2;
+            for (int i = 0; i < particles; i++) {
+                final Vec3 point = globalFirstPoint.lerp(globalTarget, level.random.nextFloat());
+                level.addParticle(
+                        new net.minecraft.core.particles.DustParticleOptions(color.asVectorF(), 1),
+                        point.x, point.y, point.z,
+                        0, 0, 0
+                );
+            }
         }
     }
 
-    private static @Nullable Vec3 resolvePendingPoint(final Level level, final PendingTowEndpoint pending) {
+    private static @Nullable Vec3 resolvePendingPoint(final Level level, final Vec3 searchCenter, final PendingTowEndpoint pending) {
         if (pending.isBlock()) {
             return resolveBlockPoint(level, pending.blockPos());
         }
         if (pending.isEntity()) {
-            final Entity entity = level.getEntities((Entity) null, new AABB(-3.0E7, -2048.0, -3.0E7, 3.0E7, 4096.0, 3.0E7),
-                            candidate -> pending.entityId().equals(candidate.getUUID()))
-                    .stream()
-                    .filter(Entity::isAlive)
-                    .findFirst()
-                    .orElse(null);
+            final Entity entity = resolveNearbyEntity(level, searchCenter, pending.entityId());
             if (entity != null && entity.isAlive()) {
                 return resolveEntityPoint(entity);
             }
         }
         return null;
+    }
+
+    private static @Nullable Entity resolveNearbyEntity(final Level level, final Vec3 searchCenter, final java.util.UUID entityId) {
+        if (isUsableCachedEntity(level, entityId)) {
+            return cachedPendingEntity;
+        }
+
+        final long gameTime = level.getGameTime();
+        if (gameTime < nextPendingEntityLookupTick && entityId.equals(cachedPendingEntityId)) {
+            return null;
+        }
+
+        final double maxRange = SimConfigService.INSTANCE.server().blocks.maxRopeRange.get();
+        final AABB searchBox = new AABB(searchCenter, searchCenter).inflate(maxRange + 8.0);
+        final Entity resolvedEntity = level.getEntities((Entity) null, searchBox, candidate -> entityId.equals(candidate.getUUID()))
+                .stream()
+                .filter(Entity::isAlive)
+                .findFirst()
+                .orElse(null);
+        cachedPendingEntityId = entityId;
+        cachedPendingEntity = resolvedEntity;
+        nextPendingEntityLookupTick = gameTime + ENTITY_LOOKUP_RETRY_TICKS;
+        return resolvedEntity;
     }
 
     private static @Nullable Vec3 resolveBlockPoint(final Level level, final @Nullable BlockPos blockPos) {
@@ -157,5 +187,13 @@ public final class TowedConnectionPreviewHandler {
         }
 
         return Sable.HELPER.projectOutOfSubLevel(entity.level(), TowAnchorPoints.resolveEntityTowPoint(entity));
+    }
+
+    private static boolean isUsableCachedEntity(final Level level, final java.util.UUID entityId) {
+        return cachedPendingEntity != null
+                && cachedPendingEntity.isAlive()
+                && cachedPendingEntity.level() == level
+                && entityId.equals(cachedPendingEntityId)
+                && entityId.equals(cachedPendingEntity.getUUID());
     }
 }

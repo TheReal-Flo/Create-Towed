@@ -10,6 +10,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.InteractionResult;
+import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.player.Player;
@@ -24,8 +25,9 @@ public final class TowedInteractionHandler {
     public static void handleRightClickBlock(final PlayerInteractEvent.RightClickBlock event) {
         final Level level = event.getLevel();
         final BlockPos pos = event.getPos();
-        final ItemStack stack = event.getItemStack();
         final Player player = event.getEntity();
+        final InteractionHand hand = event.getHand();
+        final ItemStack stack = player.getItemInHand(hand);
 
         if (!TowAnchorPoints.isTowBlockAttachment(level, pos)) {
             return;
@@ -44,9 +46,7 @@ public final class TowedInteractionHandler {
         }
 
         if (player.isShiftKeyDown()) {
-            if (!level.isClientSide) {
-                clearPending(stack);
-            }
+            clearPending(stack);
             consume(event, InteractionResult.sidedSuccess(level.isClientSide));
             return;
         }
@@ -54,7 +54,7 @@ public final class TowedInteractionHandler {
         if (!level.isClientSide) {
             final PendingTowEndpoint pending = stack.get(TowedDataComponents.PENDING_TOW_ENDPOINT);
             if (pending != null && pending.isEntity()) {
-                final boolean created = TowRopeSavedData.get((net.minecraft.server.level.ServerLevel) level).tryCreate(pos, pending.entityId(), player);
+                final boolean created = TowRopeSavedData.get((net.minecraft.server.level.ServerLevel) level).tryCreate(pos, pending.entityId());
                 clearPending(stack);
                 if (created) {
                     finalizeCreation(player, stack, pos);
@@ -62,33 +62,41 @@ public final class TowedInteractionHandler {
             } else {
                 stack.set(TowedDataComponents.PENDING_TOW_ENDPOINT, PendingTowEndpoint.block(pos));
             }
+        } else if (!stack.has(TowedDataComponents.PENDING_TOW_ENDPOINT)) {
+            stack.set(TowedDataComponents.PENDING_TOW_ENDPOINT, PendingTowEndpoint.block(pos));
         }
 
         consume(event, InteractionResult.sidedSuccess(level.isClientSide));
     }
 
     public static void handleEntityInteract(final PlayerInteractEvent.EntityInteract event) {
-        final Player player = event.getEntity();
-        final Level level = event.getLevel();
-        final ItemStack stack = event.getItemStack();
-        final Entity target = event.getTarget();
+        handleEntityInteract(event.getEntity(), event.getLevel(), event.getHand(), event.getTarget(), result -> consume(event, result));
+    }
 
+    public static void handleEntityInteract(final PlayerInteractEvent.EntityInteractSpecific event) {
+        handleEntityInteract(event.getEntity(), event.getLevel(), event.getHand(), event.getTarget(), result -> consume(event, result));
+    }
+
+    private static void handleEntityInteract(final Player player,
+                                             final Level level,
+                                             final InteractionHand hand,
+                                             final Entity target,
+                                             final java.util.function.Consumer<InteractionResult> consumeAction) {
+        final ItemStack stack = player.getItemInHand(hand);
         if (!stack.is(SimItems.ROPE_COUPLING.get()) || !(target instanceof Mob mob) || !mob.canBeLeashed()) {
             return;
         }
 
         if (player.isShiftKeyDown()) {
-            if (!level.isClientSide) {
-                clearPending(stack);
-            }
-            consume(event, InteractionResult.sidedSuccess(level.isClientSide));
+            clearPending(stack);
+            consumeAction.accept(InteractionResult.sidedSuccess(level.isClientSide));
             return;
         }
 
         if (!level.isClientSide) {
             final PendingTowEndpoint pending = stack.get(TowedDataComponents.PENDING_TOW_ENDPOINT);
             if (pending != null && pending.isBlock()) {
-                final boolean created = TowRopeSavedData.get((net.minecraft.server.level.ServerLevel) level).tryCreate(pending.blockPos(), mob.getUUID(), player);
+                final boolean created = TowRopeSavedData.get((net.minecraft.server.level.ServerLevel) level).tryCreate(pending.blockPos(), mob.getUUID());
                 clearPending(stack);
                 if (created) {
                     finalizeCreation(player, stack, mob.blockPosition());
@@ -96,22 +104,22 @@ public final class TowedInteractionHandler {
             } else {
                 stack.set(TowedDataComponents.PENDING_TOW_ENDPOINT, PendingTowEndpoint.entity(mob.getUUID()));
             }
+        } else if (!stack.has(TowedDataComponents.PENDING_TOW_ENDPOINT)) {
+            stack.set(TowedDataComponents.PENDING_TOW_ENDPOINT, PendingTowEndpoint.entity(mob.getUUID()));
         }
 
-        consume(event, InteractionResult.sidedSuccess(level.isClientSide));
+        consumeAction.accept(InteractionResult.sidedSuccess(level.isClientSide));
     }
 
     public static void handleRightClickItem(final PlayerInteractEvent.RightClickItem event) {
         final Player player = event.getEntity();
-        final ItemStack stack = event.getItemStack();
+        final ItemStack stack = player.getItemInHand(event.getHand());
 
         if (!stack.is(SimItems.ROPE_COUPLING.get()) || !player.isShiftKeyDown() || !stack.has(TowedDataComponents.PENDING_TOW_ENDPOINT)) {
             return;
         }
 
-        if (!event.getLevel().isClientSide) {
-            clearPending(stack);
-        }
+        clearPending(stack);
 
         event.setCancellationResult(InteractionResult.sidedSuccess(event.getLevel().isClientSide));
         event.setCanceled(true);
@@ -134,6 +142,11 @@ public final class TowedInteractionHandler {
     }
 
     private static void consume(final PlayerInteractEvent.EntityInteract event, final InteractionResult result) {
+        event.setCancellationResult(result);
+        event.setCanceled(true);
+    }
+
+    private static void consume(final PlayerInteractEvent.EntityInteractSpecific event, final InteractionResult result) {
         event.setCancellationResult(result);
         event.setCanceled(true);
     }
