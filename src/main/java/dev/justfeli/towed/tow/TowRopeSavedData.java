@@ -150,6 +150,27 @@ public final class TowRopeSavedData extends SavedData {
         final Iterator<ServerTowRope> iterator = this.ropes.values().iterator();
         while (iterator.hasNext()) {
             final ServerTowRope rope = iterator.next();
+            final ServerTowRope.AttachmentState attachmentState = rope.getAttachmentState(this.level);
+            if (attachmentState == ServerTowRope.AttachmentState.NOT_LOADED) {
+                rope.clearInvalidAttachmentGrace();
+                this.removeRuntimeOnly(rope);
+                continue;
+            }
+
+            if (attachmentState == ServerTowRope.AttachmentState.INVALID) {
+                this.removeRuntimeOnly(rope);
+                if (!rope.shouldBreakForInvalidAttachments()) {
+                    continue;
+                }
+
+                iterator.remove();
+                this.sendRemoval(rope);
+                this.dropCoupling(rope);
+                this.setDirty();
+                continue;
+            }
+
+            rope.clearInvalidAttachmentGrace();
             if (!rope.prePhysicsTick(this.level)) {
                 this.removeRuntimeOnly(rope);
                 iterator.remove();

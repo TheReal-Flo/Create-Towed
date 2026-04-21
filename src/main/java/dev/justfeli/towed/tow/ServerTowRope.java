@@ -12,6 +12,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.Mob;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.phys.Vec3;
 import org.jetbrains.annotations.Nullable;
@@ -22,12 +23,14 @@ import java.util.UUID;
 
 public final class ServerTowRope extends RopePhysicsObject {
     private static final double SEGMENT_LENGTH = 1.0;
+    private static final int INVALID_ATTACHMENT_GRACE_TICKS = 40;
 
     private final UUID ropeId;
     private final TowRopeAttachment startAttachment;
     private final TowRopeAttachment endAttachment;
     private double extensionGoal;
     private double appliedFirstSegmentLength;
+    private int invalidAttachmentTicks;
 
     public ServerTowRope(final UUID ropeId, final TowRopeAttachment startAttachment, final TowRopeAttachment endAttachment, final Collection<Vector3d> points) {
         super(points, 0.125);
@@ -36,6 +39,7 @@ public final class ServerTowRope extends RopePhysicsObject {
         this.endAttachment = endAttachment;
         this.extensionGoal = this.points.size() > 1 ? this.points.get(0).distance(this.points.get(1)) : SEGMENT_LENGTH;
         this.appliedFirstSegmentLength = this.extensionGoal;
+        this.invalidAttachmentTicks = 0;
     }
 
     public UUID ropeId() {
@@ -78,6 +82,7 @@ public final class ServerTowRope extends RopePhysicsObject {
 
     public void serverTick(final ServerLevel level) {
         this.updateWinchExtension(level);
+        this.applyEntityTow(level);
     }
 
     public boolean refreshAttachments(final ServerLevel level) {
@@ -91,6 +96,24 @@ public final class ServerTowRope extends RopePhysicsObject {
         this.setAttachment(RopeHandle.AttachmentPoint.START, startEndpoint.localPoint(), startEndpoint.subLevel());
         this.setAttachment(RopeHandle.AttachmentPoint.END, endEndpoint.localPoint(), endEndpoint.subLevel());
         return true;
+    }
+
+    public AttachmentState getAttachmentState(final ServerLevel level) {
+        final AttachmentState startState = this.getAttachmentState(level, this.startAttachment, true);
+        if (startState != AttachmentState.READY) {
+            return startState;
+        }
+
+        return this.getAttachmentState(level, this.endAttachment, false);
+    }
+
+    public boolean shouldBreakForInvalidAttachments() {
+        this.invalidAttachmentTicks++;
+        return this.invalidAttachmentTicks >= INVALID_ATTACHMENT_GRACE_TICKS;
+    }
+
+    public void clearInvalidAttachmentGrace() {
+        this.invalidAttachmentTicks = 0;
     }
 
     public boolean prePhysicsTick(final ServerLevel level) {
@@ -143,6 +166,84 @@ public final class ServerTowRope extends RopePhysicsObject {
         final SubLevel containing = Sable.HELPER.getContaining(entity);
         final Vec3 point = TowAnchorPoints.resolveEntityTowPoint(entity);
         return new AttachmentEndpoint(JOMLConversion.toJOML(point), containing instanceof ServerSubLevel serverSubLevel ? serverSubLevel : null);
+    }
+
+    private AttachmentState getAttachmentState(final ServerLevel level, final TowRopeAttachment attachment, final boolean startSide) {
+        if (attachment.isBlock()) {
+            final BlockPos blockPos = attachment.blockPos();
+            if (!level.isLoaded(blockPos)) {
+                return AttachmentState.NOT_LOADED;
+            }
+
+            return TowAnchorPoints.resolveBlockTowPoint(level.getBlockEntity(blockPos)) != null
+                    ? AttachmentState.READY
+                    : AttachmentState.INVALID;
+        }
+
+        if (attachment.isEntity()) {
+            final Entity entity = level.getEntity(attachment.entityId());
+            if (entity != null && entity.isAlive()) {
+                return AttachmentState.READY;
+            }
+
+            final BlockPos loadHint = this.getEntityLoadHint(startSide);
+            return level.isLoaded(loadHint) ? AttachmentState.INVALID : AttachmentState.NOT_LOADED;
+        }
+
+        return AttachmentState.INVALID;
+    }
+
+    private BlockPos getEntityLoadHint(final boolean startSide) {
+        final Vector3d endpoint = this.points.get(startSide ? 0 : this.points.size() - 1);
+        return BlockPos.containing(endpoint.x, endpoint.y, endpoint.z);
+    }
+
+    private void applyEntityTow(final ServerLevel level) {
+        final boolean entityAtStart;
+        final TowRopeAttachment entityAttachment;
+        if (this.startAttachment.isEntity()) {
+            entityAtStart = true;
+            entityAttachment = this.startAttachment;
+        } else if (this.endAttachment.isEntity()) {
+            entityAtStart = false;
+            entityAttachment = this.endAttachment;
+        } else {
+            return;
+        }
+
+        if (this.points.size() < 2) {
+            return;
+        }
+
+        final Entity entity = level.getEntity(entityAttachment.entityId());
+        if (!(entity instanceof Mob mob) || !mob.isAlive()) {
+            return;
+        }
+
+        final Vec3 towPoint = TowAnchorPoints.resolveEntityTowPoint(mob);
+        final Vector3d interiorPoint = this.points.get(entityAtStart ? 1 : this.points.size() - 2);
+        final Vec3 ropeDirectionPoint = JOMLConversion.toMojang(interiorPoint);
+        final Vec3 pullVector = ropeDirectionPoint.subtract(towPoint);
+        final double distance = pullVector.length();
+        if (distance <= 1.0E-4) {
+            return;
+        }
+
+        final TowEntityProfile profile = TowEntityProfile.from(mob);
+        if (distance <= profile.slackDistance()) {
+            return;
+        }
+
+        mob.getNavigation().moveTo(ropeDirectionPoint.x, ropeDirectionPoint.y, ropeDirectionPoint.z, profile.navigationSpeed(distance));
+
+        final Vec3 normalizedPull = pullVector.scale(1.0 / distance);
+        final double impulseMagnitude = profile.impulseMagnitude(distance);
+        final double verticalImpulse = normalizedPull.y > 0.0 ? normalizedPull.y * impulseMagnitude * 0.75 : normalizedPull.y * impulseMagnitude * 0.15;
+        mob.setDeltaMovement(mob.getDeltaMovement().add(normalizedPull.x * impulseMagnitude, verticalImpulse, normalizedPull.z * impulseMagnitude));
+
+        if (verticalImpulse > 0.08 && mob.onGround()) {
+            mob.setOnGround(false);
+        }
     }
 
     private void updateWinchExtension(final ServerLevel level) {
@@ -217,5 +318,11 @@ public final class ServerTowRope extends RopePhysicsObject {
     }
 
     public record AttachmentEndpoint(Vector3d localPoint, @Nullable ServerSubLevel subLevel) {
+    }
+
+    public enum AttachmentState {
+        READY,
+        NOT_LOADED,
+        INVALID
     }
 }
