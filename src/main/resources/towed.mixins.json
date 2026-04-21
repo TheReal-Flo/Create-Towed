@@ -1,0 +1,15 @@
+{
+  "required": true,
+  "package": "dev.justfeli.towed.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [],
+  "client": [
+    "client.ClientSubLevelContainerTowRopeMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  },
+  "overwrites": {
+    "requireAnnotations": true
+  }
+}
