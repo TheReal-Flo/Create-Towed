@@ -14,7 +14,6 @@ import org.joml.Vector3d;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
-import java.util.ArrayList;
 
 public final class ClientTowRopeManager {
     private static final WorldAttached<ClientTowRopeManager> WORLD_ATTACHED = new WorldAttached<>(ClientTowRopeManager::create);
@@ -63,7 +62,7 @@ public final class ClientTowRopeManager {
     }
 
     public void tickInterpolation(final Level level, final double interpolationTick) {
-        final List<UUID> staleRopes = new ArrayList<>();
+        final List<UUID> staleRopes = new ObjectArrayList<>();
         for (final TowedClientRopeStrand rope : this.ropes.values()) {
             rope.tickTowInterpolation(level, interpolationTick);
             if (rope.shouldDiscard(level)) {

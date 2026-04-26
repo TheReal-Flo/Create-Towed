@@ -38,5 +38,6 @@ public final class TowedConfig {
         SERVER_SPEC = serverBuilder.build();
     }
 
-    private TowedConfig() {}
+    private TowedConfig() {
+    }
 }

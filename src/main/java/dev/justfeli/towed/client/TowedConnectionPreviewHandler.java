@@ -4,6 +4,7 @@ import dev.justfeli.towed.data.PendingTowEndpoint;
 import dev.justfeli.towed.index.TowedDataComponents;
 import dev.justfeli.towed.tow.TowAnchorPoints;
 import dev.ryanhcode.sable.Sable;
+import dev.simulated_team.simulated.index.SimDataComponents;
 import dev.simulated_team.simulated.index.SimItems;
 import dev.simulated_team.simulated.service.SimConfigService;
 import dev.simulated_team.simulated.util.SimColors;
@@ -48,7 +49,7 @@ public final class TowedConnectionPreviewHandler {
                 continue;
             }
 
-            final PendingTowEndpoint pending = heldItem.get(TowedDataComponents.PENDING_TOW_ENDPOINT);
+            final PendingTowEndpoint pending = resolvePendingEndpoint(heldItem);
             if (pending == null) {
                 continue;
             }
@@ -56,6 +57,16 @@ public final class TowedConnectionPreviewHandler {
             renderPreview(minecraft.level, minecraft.player.position(), pending, minecraft.hitResult);
             return;
         }
+    }
+
+    private static @Nullable PendingTowEndpoint resolvePendingEndpoint(final ItemStack stack) {
+        final PendingTowEndpoint pending = stack.get(TowedDataComponents.PENDING_TOW_ENDPOINT);
+        if (pending != null) {
+            return pending;
+        }
+
+        final BlockPos ropeFirstConnection = stack.get(SimDataComponents.ROPE_FIRST_CONNECTION);
+        return ropeFirstConnection != null ? PendingTowEndpoint.block(ropeFirstConnection) : null;
     }
 
     private static void renderPreview(final Level level,
@@ -99,19 +110,16 @@ public final class TowedConnectionPreviewHandler {
                 .lineWidth(1 / 3f)
                 .disableLineNormals();
 
-        final Vec3 globalFirstPoint = firstPoint;
-        final Vec3 globalTarget = target;
-
         if (valid) {
             Outliner.getInstance().chaseAABB("TowedSecondAttachmentPoint", new AABB(target, target))
                     .colored(color)
                     .lineWidth(1 / 3f)
                     .disableLineNormals();
 
-            final int points = Mth.clamp(Mth.ceil((float) (globalFirstPoint.distanceTo(globalTarget) * 0.5)), 1, MAX_PREVIEW_POINTS);
+            final int points = Mth.clamp(Mth.ceil((float) (firstPoint.distanceTo(target) * 0.5)), 1, MAX_PREVIEW_POINTS);
             for (int i = 0; i < points; i++) {
                 final double lerpDelta = points == 1 ? 0.5 : i / (double) (points - 1);
-                final Vec3 point = globalFirstPoint.lerp(globalTarget, lerpDelta);
+                final Vec3 point = firstPoint.lerp(target, lerpDelta);
                 Outliner.getInstance().chaseAABB("TowedRopePreviewPoint" + i, new AABB(point, point))
                         .colored(color)
                         .lineWidth(1 / 8f)
@@ -122,7 +130,7 @@ public final class TowedConnectionPreviewHandler {
         if (level.getGameTime() % PARTICLE_SPAWN_INTERVAL_TICKS == 0L) {
             final int particles = 2;
             for (int i = 0; i < particles; i++) {
-                final Vec3 point = globalFirstPoint.lerp(globalTarget, level.random.nextFloat());
+                final Vec3 point = firstPoint.lerp(target, level.random.nextFloat());
                 level.addParticle(
                         new net.minecraft.core.particles.DustParticleOptions(color.asVectorF(), 1),
                         point.x, point.y, point.z,
@@ -157,11 +165,14 @@ public final class TowedConnectionPreviewHandler {
 
         final double maxRange = SimConfigService.INSTANCE.server().blocks.maxRopeRange.get();
         final AABB searchBox = new AABB(searchCenter, searchCenter).inflate(maxRange + 8.0);
-        final Entity resolvedEntity = level.getEntities((Entity) null, searchBox, candidate -> entityId.equals(candidate.getUUID()))
-                .stream()
-                .filter(Entity::isAlive)
-                .findFirst()
-                .orElse(null);
+        @Nullable Entity resolvedEntity = null;
+        for (final Entity candidate : level.getEntities((Entity) null, searchBox, entity -> entityId.equals(entity.getUUID()))) {
+            if (candidate.isAlive()) {
+                resolvedEntity = candidate;
+                break;
+            }
+        }
+
         cachedPendingEntityId = entityId;
         cachedPendingEntity = resolvedEntity;
         nextPendingEntityLookupTick = gameTime + ENTITY_LOOKUP_RETRY_TICKS;

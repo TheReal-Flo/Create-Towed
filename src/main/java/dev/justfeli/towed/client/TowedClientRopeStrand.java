@@ -116,17 +116,19 @@ public final class TowedClientRopeStrand extends ClientRopeStrand {
             return null;
         }
 
-        final BlockPos searchOrigin = this.resolveSearchOrigin();
+        final BlockPos searchOrigin = this.resolveSearchOrigin(startSide);
         if (searchOrigin == null) {
             return null;
         }
 
         final double maxRange = SimConfigService.INSTANCE.server().blocks.maxRopeRange.get();
         final AABB searchBox = new AABB(searchOrigin).inflate(maxRange + 4.0);
-        final Entity entity = level.getEntities((Entity) null, searchBox, candidate -> entityId.equals(candidate.getUUID()))
-                .stream()
-                .findFirst()
-                .orElse(null);
+        @Nullable Entity entity = null;
+        for (final Entity candidate : level.getEntities((Entity) null, searchBox, candidateEntity -> entityId.equals(candidateEntity.getUUID()))) {
+            entity = candidate;
+            break;
+        }
+
         if (!this.isUsableCachedEntity(level, entity, entityId)) {
             this.cacheEntity(startSide, null, gameTime + ENTITY_LOOKUP_RETRY_TICKS);
             return null;
@@ -159,7 +161,12 @@ public final class TowedClientRopeStrand extends ClientRopeStrand {
         return new Vector3d(projected.x, projected.y, projected.z);
     }
 
-    private @Nullable BlockPos resolveSearchOrigin() {
+    private @Nullable BlockPos resolveSearchOrigin(final boolean startSide) {
+        if (!this.getPoints().isEmpty()) {
+            final Vector3d point = startSide ? this.getPoints().getFirst().position() : this.getPoints().getLast().position();
+            return BlockPos.containing(point.x, point.y, point.z);
+        }
+
         if (this.startAttachment != null && this.startAttachment.isBlock()) {
             return this.startAttachment.blockPos();
         }

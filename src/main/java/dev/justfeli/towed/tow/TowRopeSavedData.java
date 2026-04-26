@@ -9,8 +9,6 @@ import dev.ryanhcode.sable.api.sublevel.ServerSubLevelContainer;
 import dev.ryanhcode.sable.api.sublevel.SubLevelContainer;
 import dev.ryanhcode.sable.companion.math.JOMLConversion;
 import dev.ryanhcode.sable.sublevel.system.SubLevelPhysicsSystem;
-import com.simibubi.create.foundation.blockEntity.SmartBlockEntity;
-import dev.simulated_team.simulated.content.blocks.rope.RopeStrandHolderBehavior;
 import dev.simulated_team.simulated.index.SimItems;
 import dev.simulated_team.simulated.service.SimConfigService;
 import foundry.veil.api.network.VeilPacketManager;
@@ -36,8 +34,10 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 public final class TowRopeSavedData extends SavedData {
@@ -83,11 +83,8 @@ public final class TowRopeSavedData extends SavedData {
             return false;
         }
 
-        if (this.level.getBlockEntity(blockPos) instanceof final SmartBlockEntity smartBlockEntity) {
-            final RopeStrandHolderBehavior ropeHolder = smartBlockEntity.getBehaviour(RopeStrandHolderBehavior.TYPE);
-            if (ropeHolder != null && ropeHolder.isAttached()) {
-                return false;
-            }
+        if (TowAnchorPoints.hasSimulatedRopeAttachment(this.level, blockPos)) {
+            return false;
         }
 
         final TowRopeAttachment startAttachment = TowRopeAttachment.block(blockPos);
@@ -152,6 +149,16 @@ public final class TowRopeSavedData extends SavedData {
         return false;
     }
 
+    public boolean hasBlockAttachment(final BlockPos blockPos) {
+        for (final ServerTowRope rope : this.ropes.values()) {
+            if (rope.matchesBlock(blockPos)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public void physicsTick(final SubLevelPhysicsSystem physicsSystem, final double timeStep) {
         final Iterator<ServerTowRope> iterator = this.ropes.values().iterator();
         while (iterator.hasNext()) {
@@ -186,7 +193,7 @@ public final class TowRopeSavedData extends SavedData {
                 continue;
             }
 
-            rope.physicsTick(this.level, timeStep);
+            rope.physicsTick(physicsSystem, timeStep);
 
             if (!rope.isActive()) {
                 if (physicsSystem.getTicketManager().wouldBeLoaded(this.level, rope)) {
@@ -208,15 +215,17 @@ public final class TowRopeSavedData extends SavedData {
         }
 
         final int interpolationTick = container.trackingSystem().getInterpolationTick();
+        boolean persistentStateChanged = false;
         for (final ServerTowRope rope : this.ropes.values()) {
-            rope.serverTick(this.level);
+            persistentStateChanged |= rope.serverTick(this.level);
 
             if (!rope.isActive()) {
                 continue;
             }
 
             rope.updatePose();
-            final Collection<ServerPlayer> trackingPlayers = this.getTrackingPlayers(rope.trackingBlockPos());
+            rope.updateVisualEntityEndpoint(this.level);
+            final Collection<ServerPlayer> trackingPlayers = this.getTrackingPlayers(rope);
             if (trackingPlayers.isEmpty()) {
                 continue;
             }
@@ -235,7 +244,9 @@ public final class TowRopeSavedData extends SavedData {
             }
         }
 
-        this.setDirty();
+        if (persistentStateChanged) {
+            this.setDirty();
+        }
     }
 
     private boolean removeRope(final UUID ropeId, final boolean dropItem) {
@@ -264,9 +275,17 @@ public final class TowRopeSavedData extends SavedData {
 
     private void sendRemoval(final ServerTowRope rope) {
         final ClientboundTowRopeRemovePacket packet = new ClientboundTowRopeRemovePacket(rope.ropeId());
-        for (final ServerPlayer player : this.getTrackingPlayers(rope.trackingBlockPos())) {
+        for (final ServerPlayer player : this.getTrackingPlayers(rope)) {
             VeilPacketManager.player(player).sendPacket(packet);
         }
+    }
+
+    private Collection<ServerPlayer> getTrackingPlayers(final ServerTowRope rope) {
+        final Set<ServerPlayer> players = new LinkedHashSet<>();
+        for (final BlockPos blockPos : rope.trackingBlockPositions(this.level)) {
+            players.addAll(this.getTrackingPlayers(blockPos));
+        }
+        return players;
     }
 
     private Collection<ServerPlayer> getTrackingPlayers(final @Nullable BlockPos blockPos) {

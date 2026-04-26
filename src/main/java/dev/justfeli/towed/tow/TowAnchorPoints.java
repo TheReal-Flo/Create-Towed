@@ -19,31 +19,32 @@ public final class TowAnchorPoints {
     }
 
     public static boolean isTowBlockAttachment(final @Nullable BlockEntity blockEntity) {
-        if (blockEntity instanceof final SmartBlockEntity smartBlockEntity) {
-            return smartBlockEntity.getBehaviour(RopeStrandHolderBehavior.TYPE) != null;
-        }
+        return getRopeHolder(blockEntity) != null;
+    }
 
-        return false;
+    public static boolean hasSimulatedRopeAttachment(final Level level, final BlockPos blockPos) {
+        final RopeStrandHolderBehavior ropeHolder = getRopeHolder(level.getBlockEntity(blockPos));
+        return ropeHolder != null && ropeHolder.isAttached();
     }
 
     public static @Nullable Vector3d resolveBlockTowPoint(final @Nullable BlockEntity blockEntity) {
-        if (blockEntity instanceof final SmartBlockEntity smartBlockEntity) {
-            final RopeStrandHolderBehavior ropeHolder = smartBlockEntity.getBehaviour(RopeStrandHolderBehavior.TYPE);
-            if (ropeHolder != null) {
-                final Vec3 attachmentPoint = ropeHolder.getAttachmentPoint();
-                return new Vector3d(attachmentPoint.x, attachmentPoint.y, attachmentPoint.z);
-            }
+        final RopeStrandHolderBehavior ropeHolder = getRopeHolder(blockEntity);
+        if (ropeHolder != null) {
+            final Vec3 attachmentPoint = ropeHolder.getAttachmentPoint();
+            return new Vector3d(attachmentPoint.x, attachmentPoint.y, attachmentPoint.z);
         }
 
         return null;
     }
 
     public static @Nullable Vec3 resolveVisualBlockTowPoint(final @Nullable BlockEntity blockEntity) {
+        final RopeStrandHolderBehavior ropeHolder = getRopeHolder(blockEntity);
+        return ropeHolder != null ? ropeHolder.getVisualAttachmentPoint() : null;
+    }
+
+    private static @Nullable RopeStrandHolderBehavior getRopeHolder(final @Nullable BlockEntity blockEntity) {
         if (blockEntity instanceof final SmartBlockEntity smartBlockEntity) {
-            final RopeStrandHolderBehavior ropeHolder = smartBlockEntity.getBehaviour(RopeStrandHolderBehavior.TYPE);
-            if (ropeHolder != null) {
-                return ropeHolder.getVisualAttachmentPoint();
-            }
+            return smartBlockEntity.getBehaviour(RopeStrandHolderBehavior.TYPE);
         }
 
         return null;

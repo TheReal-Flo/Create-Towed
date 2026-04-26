@@ -5,6 +5,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.phys.AABB;
 
 public record TowEntityProfile(double weight, double strength) {
+    static final double ENTITY_FORCE_MULTIPLIER = 0.5;
     private static final double MIN_HITBOX_VOLUME = 0.125;
     private static final double MIN_HITBOX_CROSS_SECTION = 0.25;
 
@@ -35,9 +36,16 @@ public record TowEntityProfile(double weight, double strength) {
                                 final double surfaceFriction,
                                 final double contraptionRequiredForce) {
         final double excess = Math.max(0.0, distance - this.slackDistance());
+        return this.recoverySpeedForStretch(excess, grounded, surfaceFriction, contraptionRequiredForce);
+    }
+
+    public double recoverySpeedForStretch(final double stretch,
+                                          final boolean grounded,
+                                          final double surfaceFriction,
+                                          final double contraptionRequiredForce) {
         final double driveForce = Math.max(0.15, this.tractionForce(grounded, surfaceFriction) - contraptionRequiredForce);
         final double responsiveness = driveForce / this.weight;
-        return Mth.clamp(0.95 + (excess * 0.38 * responsiveness), 0.9, 2.4);
+        return Mth.clamp(0.95 + (stretch * 0.38 * responsiveness), 0.9, 2.4);
     }
 
     public double springStrength() {
@@ -50,7 +58,7 @@ public record TowEntityProfile(double weight, double strength) {
 
     public double tractionForce(final boolean grounded, final double surfaceFriction) {
         final double tractionMultiplier = grounded ? 0.32 : 0.08;
-        return this.effectiveStrength(surfaceFriction) * tractionMultiplier;
+        return this.effectiveStrength(surfaceFriction) * tractionMultiplier * ENTITY_FORCE_MULTIPLIER;
     }
 
     public double tractionImpulse(final double usableTractionForce, final double timeStep) {
@@ -59,6 +67,10 @@ public record TowEntityProfile(double weight, double strength) {
 
     public double ropeLoad(final double distance, final double relativeSpeedAlongRope) {
         final double stretch = Math.max(0.0, distance - this.slackDistance());
+        return this.ropeLoadForStretch(stretch, relativeSpeedAlongRope);
+    }
+
+    public double ropeLoadForStretch(final double stretch, final double relativeSpeedAlongRope) {
         return Math.max(0.0, stretch * this.springStrength() + relativeSpeedAlongRope * this.dampingStrength());
     }
 
@@ -66,6 +78,6 @@ public record TowEntityProfile(double weight, double strength) {
                                  final double availableTractionForce,
                                  final double timeStep) {
         final double resistedTension = Math.max(0.0, ropeLoad - availableTractionForce);
-        return Mth.clamp(resistedTension * timeStep / this.weight, 0.0, 0.18);
+        return Mth.clamp(resistedTension * timeStep / this.weight, 0.0, 0.18) * ENTITY_FORCE_MULTIPLIER;
     }
 }
