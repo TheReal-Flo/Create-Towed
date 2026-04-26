@@ -149,6 +149,22 @@ public final class TowRopeSavedData extends SavedData {
         return false;
     }
 
+    public Vec3 constrainEntityMovement(final Entity entity, final Vec3 movement) {
+        Vec3 constrained = movement;
+        for (final ServerTowRope rope : this.ropes.values()) {
+            if (!rope.matchesEntity(entity.getUUID())) {
+                continue;
+            }
+
+            constrained = rope.constrainEntityMovement(this.level, entity, constrained);
+            if (constrained.lengthSqr() <= 1.0E-10) {
+                return Vec3.ZERO;
+            }
+        }
+
+        return constrained;
+    }
+
     public boolean hasBlockAttachment(final BlockPos blockPos) {
         for (final ServerTowRope rope : this.ropes.values()) {
             if (rope.matchesBlock(blockPos)) {

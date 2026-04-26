@@ -60,17 +60,44 @@ public final class TowedClientRopeStrand extends ClientRopeStrand {
 
         final Vector3d startPointPosition = this.resolveAttachmentPoint(level, this.startAttachment, true);
         if (startPointPosition != null) {
-            final ClientRopePoint startPoint = this.getPoints().getFirst();
-            startPoint.position().set(startPointPosition);
-            startPoint.previousPosition().set(startPointPosition);
+            this.applyEndpointCorrection(startPointPosition, true, this.startAttachment != null && this.startAttachment.isEntity());
         }
 
         final Vector3d endPointPosition = this.resolveAttachmentPoint(level, this.endAttachment, false);
         if (endPointPosition != null) {
-            final ClientRopePoint endPoint = this.getPoints().getLast();
-            endPoint.position().set(endPointPosition);
-            endPoint.previousPosition().set(endPointPosition);
+            this.applyEndpointCorrection(endPointPosition, false, this.endAttachment != null && this.endAttachment.isEntity());
         }
+    }
+
+    private void applyEndpointCorrection(final Vector3d targetPosition, final boolean startSide, final boolean propagateAcrossRope) {
+        final ClientRopePoint endpoint = startSide ? this.getPoints().getFirst() : this.getPoints().getLast();
+        if (!propagateAcrossRope || this.getPoints().size() < 2) {
+            endpoint.position().set(targetPosition);
+            endpoint.previousPosition().set(targetPosition);
+            return;
+        }
+
+        final Vector3d delta = new Vector3d(targetPosition).sub(endpoint.position());
+        if (delta.lengthSquared() <= 1.0E-8) {
+            endpoint.position().set(targetPosition);
+            endpoint.previousPosition().set(targetPosition);
+            return;
+        }
+
+        final double maxIndex = this.getPoints().size() - 1.0;
+        for (int i = 0; i < this.getPoints().size(); i++) {
+            final double weight = startSide ? (maxIndex - i) / maxIndex : i / maxIndex;
+            if (weight <= 0.0) {
+                continue;
+            }
+
+            final ClientRopePoint point = this.getPoints().get(i);
+            point.position().fma(weight, delta);
+            point.previousPosition().fma(weight, delta);
+        }
+
+        endpoint.position().set(targetPosition);
+        endpoint.previousPosition().set(targetPosition);
     }
 
     private boolean shouldDiscard(final Level level, final @Nullable TowRopeAttachment attachment) {

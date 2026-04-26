@@ -5,7 +5,8 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.phys.AABB;
 
 public record TowEntityProfile(double weight, double strength) {
-    static final double ENTITY_FORCE_MULTIPLIER = 0.0;
+    static final double ENTITY_FORCE_MULTIPLIER = 2.35;
+    private static final double GAME_TICK_SECONDS = 1.0 / 20.0;
     private static final double MIN_HITBOX_VOLUME = 0.125;
     private static final double MIN_HITBOX_CROSS_SECTION = 0.25;
 
@@ -57,12 +58,23 @@ public record TowEntityProfile(double weight, double strength) {
     }
 
     public double tractionForce(final boolean grounded, final double surfaceFriction) {
-        final double tractionMultiplier = grounded ? 0.26 : 0.06;
+        final double tractionMultiplier = grounded ? 15.5 : 3.4;
         return this.effectiveStrength(surfaceFriction) * tractionMultiplier * ENTITY_FORCE_MULTIPLIER;
     }
 
     public double tractionImpulse(final double usableTractionForce, final double timeStep) {
         return Mth.clamp(usableTractionForce * timeStep / this.weight, 0.0, 0.2);
+    }
+
+    public double desiredTowForceForBlockedMovement(final double blockedDistance) {
+        if (blockedDistance <= 1.0E-6) {
+            return 0.0;
+        }
+
+        final double desiredSpeed = blockedDistance / GAME_TICK_SECONDS;
+        final double startupForce = this.weight * 6.8 * ENTITY_FORCE_MULTIPLIER;
+        final double accelerationForce = this.weight * desiredSpeed / GAME_TICK_SECONDS * 2.8;
+        return Math.max(startupForce, accelerationForce);
     }
 
     public double ropeLoad(final double distance, final double relativeSpeedAlongRope) {
