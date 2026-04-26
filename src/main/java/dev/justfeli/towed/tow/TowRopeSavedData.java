@@ -208,17 +208,32 @@ public final class TowRopeSavedData extends SavedData {
         if (this.ropes.isEmpty()) {
             return;
         }
-
-        final ServerSubLevelContainer container = SubLevelContainer.getContainer(this.level);
-        if (container == null) {
-            return;
-        }
-
-        final int interpolationTick = container.trackingSystem().getInterpolationTick();
         boolean persistentStateChanged = false;
         for (final ServerTowRope rope : this.ropes.values()) {
             persistentStateChanged |= rope.serverTick(this.level);
+        }
 
+        if (persistentStateChanged) {
+            this.setDirty();
+        }
+    }
+
+    public Iterable<UUID> neededTrackingPlayers() {
+        final Set<UUID> players = new LinkedHashSet<>();
+        for (final ServerTowRope rope : this.ropes.values()) {
+            if (!rope.isActive()) {
+                continue;
+            }
+
+            for (final ServerPlayer player : this.getTrackingPlayers(rope)) {
+                players.add(player.getUUID());
+            }
+        }
+        return players;
+    }
+
+    public void sendTrackingData(final int interpolationTick) {
+        for (final ServerTowRope rope : this.ropes.values()) {
             if (!rope.isActive()) {
                 continue;
             }
@@ -242,10 +257,6 @@ public final class TowRopeSavedData extends SavedData {
             for (final ServerPlayer player : trackingPlayers) {
                 VeilPacketManager.player(player).sendPacket(packet);
             }
-        }
-
-        if (persistentStateChanged) {
-            this.setDirty();
         }
     }
 

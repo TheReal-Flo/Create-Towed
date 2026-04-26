@@ -15,6 +15,7 @@ public final class TowedPlatform {
         }
 
         initialized = true;
+        SableEventPlatform.INSTANCE.onSubLevelContainerReady(TowedCommonEvents::onContainerReady);
         SableEventPlatform.INSTANCE.onPhysicsTick(TowedCommonEvents::onPhysicsTick);
     }
 }

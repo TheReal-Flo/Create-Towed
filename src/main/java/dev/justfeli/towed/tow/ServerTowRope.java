@@ -44,8 +44,8 @@ public final class ServerTowRope extends RopePhysicsObject {
     private static final double LIFTED_PULL_THRESHOLD = 0.3;
     private static final double STUCK_IMPULSE_THRESHOLD = 0.012;
     private static final int STUCK_TICK_THRESHOLD = 6;
-    private static final double CONTRAPTION_FREE_BREAKAWAY_MASS = 32.0;
-    private static final double CONTRAPTION_BREAKAWAY_FORCE_SCALE = 0.08;
+    private static final double CONTRAPTION_FREE_BREAKAWAY_MASS = 24.0;
+    private static final double CONTRAPTION_BREAKAWAY_FORCE_SCALE = 0.11;
 
     private final UUID ropeId;
     private final TowRopeAttachment startAttachment;
@@ -174,10 +174,6 @@ public final class ServerTowRope extends RopePhysicsObject {
     private void setPhysicsAttachment(final RopeHandle.AttachmentPoint attachmentPoint,
                                       final TowRopeAttachment attachment,
                                       final AttachmentEndpoint endpoint) {
-        if (attachment.isEntity()) {
-            return;
-        }
-
         this.setAttachment(attachmentPoint, endpoint.localPoint(), endpoint.subLevel());
     }
 
@@ -374,11 +370,11 @@ public final class ServerTowRope extends RopePhysicsObject {
         final double contraptionRequiredForce = this.resolveContraptionRequiredForce(level, normalizedPull);
         this.lastContraptionRequiredForce = contraptionRequiredForce;
         final double tractionForce = profile.tractionForce(mob.onGround(), surfaceFriction) * horizontalPullFactor;
-        final double availableTractionForce = Math.max(0.0, tractionForce - contraptionRequiredForce);
-        final double appliedTowForce = Math.min(ropeLoad, availableTractionForce);
-        this.applyContraptionTowForce(physicsSystem, normalizedPull, appliedTowForce);
+        final double availableTowForce = Math.max(0.0, tractionForce - contraptionRequiredForce);
+        final double appliedTowForce = Math.min(ropeLoad, availableTowForce);
+        this.applyContraptionTowForce(physicsSystem, normalizedPull, appliedTowForce, timeStep);
         final double tractionImpulse = profile.tractionImpulse(appliedTowForce, timeStep);
-        final double counterImpulse = profile.counterImpulse(ropeLoad, availableTractionForce, timeStep) * 0.35;
+        final double counterImpulse = profile.counterImpulse(ropeLoad, availableTowForce, timeStep) * 0.35;
         final double totalImpulse = tractionImpulse + counterImpulse;
         final EntityTowControlState controlState = this.resolveTowControlState(
                 mob,
@@ -545,7 +541,8 @@ public final class ServerTowRope extends RopePhysicsObject {
 
     private void applyContraptionTowForce(final SubLevelPhysicsSystem physicsSystem,
                                           final Vec3 entityToRopeDirection,
-                                          final double towForce) {
+                                          final double towForce,
+                                          final double timeStep) {
         if (towForce <= 1.0E-5) {
             return;
         }
@@ -567,7 +564,12 @@ public final class ServerTowRope extends RopePhysicsObject {
             return;
         }
 
-        final Vector3d localForce = new Vector3d(localPull.x, localPull.y, localPull.z).normalize().mul(towForce);
+        final double towImpulse = towForce * timeStep;
+        if (towImpulse <= 1.0E-5) {
+            return;
+        }
+
+        final Vector3d localForce = new Vector3d(localPull.x, localPull.y, localPull.z).normalize().mul(towImpulse);
         physicsSystem.getPhysicsHandle(subLevel).applyImpulseAtPoint(endpoint.localPoint(), localForce);
     }
 
@@ -601,8 +603,8 @@ public final class ServerTowRope extends RopePhysicsObject {
 
         final double effectiveMass = Mth.clamp(1.0 / inverseNormalMass, 0.0, 512.0);
         final ContactProfile contactProfile = this.getCachedContraptionContactProfile(level, subLevel);
-        final double rollingForceMultiplier = contactProfile.hasRollingSupport() ? 0.45 : 1.0;
-        final double breakawayMass = Math.max(0.0, Math.cbrt(effectiveMass) - Math.cbrt(CONTRAPTION_FREE_BREAKAWAY_MASS));
+        final double rollingForceMultiplier = contactProfile.hasRollingSupport() ? 0.82 : 1.0;
+        final double breakawayMass = Math.max(0.0, Math.sqrt(effectiveMass) - Math.sqrt(CONTRAPTION_FREE_BREAKAWAY_MASS));
         return breakawayMass * CONTRAPTION_BREAKAWAY_FORCE_SCALE * contactProfile.resistanceModifier() * rollingForceMultiplier;
     }
 
@@ -734,8 +736,8 @@ public final class ServerTowRope extends RopePhysicsObject {
         double resistanceModifier = Mth.clamp(resistanceTotal / contactSamples, 0.2, 1.35);
         if (hasRollingSupport) {
             final double rollingRatio = rollingSamples / (double) contactSamples;
-            final double rollingBias = Mth.lerp((float) Math.sqrt(rollingRatio), 0.75, 0.3);
-            resistanceModifier = Mth.clamp(resistanceModifier * rollingBias, 0.08, 1.0);
+            final double rollingBias = Mth.lerp((float) Math.sqrt(rollingRatio), 0.9, 0.72);
+            resistanceModifier = Mth.clamp(resistanceModifier * rollingBias, 0.18, 1.1);
         }
 
         return new ContactProfile(resistanceModifier, hasRollingSupport);

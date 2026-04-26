@@ -5,7 +5,7 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.phys.AABB;
 
 public record TowEntityProfile(double weight, double strength) {
-    static final double ENTITY_FORCE_MULTIPLIER = 0.5;
+    static final double ENTITY_FORCE_MULTIPLIER = 0.0;
     private static final double MIN_HITBOX_VOLUME = 0.125;
     private static final double MIN_HITBOX_CROSS_SECTION = 0.25;
 
@@ -43,7 +43,7 @@ public record TowEntityProfile(double weight, double strength) {
                                           final boolean grounded,
                                           final double surfaceFriction,
                                           final double contraptionRequiredForce) {
-        final double driveForce = Math.max(0.15, this.tractionForce(grounded, surfaceFriction) - contraptionRequiredForce);
+        final double driveForce = Math.max(0.08, this.tractionForce(grounded, surfaceFriction) - contraptionRequiredForce);
         final double responsiveness = driveForce / this.weight;
         return Mth.clamp(0.95 + (stretch * 0.38 * responsiveness), 0.9, 2.4);
     }
@@ -57,7 +57,7 @@ public record TowEntityProfile(double weight, double strength) {
     }
 
     public double tractionForce(final boolean grounded, final double surfaceFriction) {
-        final double tractionMultiplier = grounded ? 0.32 : 0.08;
+        final double tractionMultiplier = grounded ? 0.26 : 0.06;
         return this.effectiveStrength(surfaceFriction) * tractionMultiplier * ENTITY_FORCE_MULTIPLIER;
     }
 
