@@ -46,6 +46,7 @@ public final class ServerTowRope extends RopePhysicsObject {
     private static final int STUCK_TICK_THRESHOLD = 6;
     private static final double CONTRAPTION_FREE_BREAKAWAY_MASS = 24.0;
     private static final double CONTRAPTION_BREAKAWAY_FORCE_SCALE = 0.11;
+    private static final double ACTIVE_TOW_EPSILON = 1.0E-4;
 
     private final UUID ropeId;
     private final TowRopeAttachment startAttachment;
@@ -183,7 +184,6 @@ public final class ServerTowRope extends RopePhysicsObject {
 
         final double remainingSlack = Math.max(0.0, maxDistance - currentDistance);
         if (outwardMovement > remainingSlack) {
-            this.blockedEntityPullDistance = Math.max(this.blockedEntityPullDistance, outwardMovement - remainingSlack);
             constrainedMovement = constrainedMovement.subtract(radialDirection.scale(outwardMovement - remainingSlack));
         }
 
@@ -196,6 +196,51 @@ public final class ServerTowRope extends RopePhysicsObject {
         }
 
         return constrainedMovement;
+    }
+
+    public void recordEntityPullDemand(final ServerLevel level, final Entity entity, final Vec3 movement) {
+        if (!this.matchesEntity(entity.getUUID()) || movement.lengthSqr() <= 1.0E-10) {
+            return;
+        }
+
+        final TowRopeAttachment blockAttachment = this.getBlockAttachment();
+        if (blockAttachment == null) {
+            return;
+        }
+
+        final AttachmentEndpoint anchorEndpoint = this.getResolvedBlockEndpoint(level, blockAttachment);
+        if (anchorEndpoint == null) {
+            return;
+        }
+
+        final Vec3 towPoint = TowAnchorPoints.resolveEntityTowPoint(entity);
+        final Vec3 anchorPoint = this.projectEndpointOutOfSubLevel(level, anchorEndpoint);
+        final double maxDistance = this.getEntityFreeMovementDistance(TowEntityProfile.from(entity));
+
+        final Vec3 currentOffset = towPoint.subtract(anchorPoint);
+        final double currentDistance = currentOffset.length();
+
+        final Vec3 radialDirection;
+        if (currentDistance > 1.0E-6) {
+            radialDirection = currentOffset.scale(1.0 / currentDistance);
+        } else {
+            final double movementLength = movement.length();
+            if (movementLength <= 1.0E-6) {
+                return;
+            }
+
+            radialDirection = movement.scale(1.0 / movementLength);
+        }
+
+        final double outwardMovement = movement.dot(radialDirection);
+        if (outwardMovement <= 0.0) {
+            return;
+        }
+
+        final double remainingSlack = Math.max(0.0, maxDistance - currentDistance);
+        if (outwardMovement > remainingSlack) {
+            this.blockedEntityPullDistance = Math.max(this.blockedEntityPullDistance, outwardMovement - remainingSlack);
+        }
     }
 
     public TowRopeState toState() {
@@ -439,16 +484,21 @@ public final class ServerTowRope extends RopePhysicsObject {
         final double surfaceFriction = this.resolveSurfaceFriction(level, mob, towPoint);
         final double horizontalPullFactor = Mth.clamp(Math.sqrt(normalizedPull.x * normalizedPull.x + normalizedPull.z * normalizedPull.z), 0.0, 1.0);
         final double ropeLoad = profile.ropeLoadForStretch(tautStretch, relativeSpeedAlongRope);
+        final boolean activelyPulling = attemptedPullStretch > 1.0E-4;
         final double movementPullDemand = profile.desiredTowForceForBlockedMovement(attemptedPullStretch) * horizontalPullFactor;
-        final double towDemand = Math.max(ropeLoad, movementPullDemand);
+        final double towDemand = activelyPulling ? Math.max(ropeLoad, movementPullDemand) : 0.0;
         final double contraptionRequiredForce = this.resolveContraptionRequiredForce(level, normalizedPull);
         this.lastContraptionRequiredForce = contraptionRequiredForce;
-        final double tractionForce = profile.tractionForce(mob.onGround(), surfaceFriction) * horizontalPullFactor;
+        final int activeTowRopeCount = Math.max(1, TowRopeSavedData.get(level).countActiveTowRopes(mob, profile));
+        final double tractionForce = profile.tractionForce(mob.onGround(), surfaceFriction) * horizontalPullFactor / activeTowRopeCount;
         final double availableTowForce = Math.max(0.0, tractionForce - contraptionRequiredForce);
         final double appliedTowForce = Math.min(towDemand, availableTowForce);
         this.applyContraptionTowForce(physicsSystem, normalizedPull, appliedTowForce, timeStep);
         final double tractionImpulse = profile.tractionImpulse(appliedTowForce, timeStep) * Mth.clamp(tautStretch / towStretch, 0.0, 1.0);
-        final double counterImpulse = profile.counterImpulse(ropeLoad, availableTowForce, timeStep) * 0.2;
+        final double passiveConstraintImpulse = tautStretch > 1.0E-4 && relativeSpeedAlongRope > 0.02
+                ? profile.counterImpulse(ropeLoad, availableTowForce, timeStep) * 0.08
+                : 0.0;
+        final double counterImpulse = activelyPulling ? passiveConstraintImpulse : passiveConstraintImpulse * 0.5;
         final double totalImpulse = tractionImpulse + counterImpulse;
         final EntityTowControlState controlState = this.resolveTowControlState(
                 mob,
@@ -613,6 +663,28 @@ public final class ServerTowRope extends RopePhysicsObject {
 
     private double getBlockedEntityPullDistance() {
         return this.blockedEntityPullDistance;
+    }
+
+    public boolean hasActiveTowDemand(final ServerLevel level, final Entity entity, final TowEntityProfile profile) {
+        if (!this.matchesEntity(entity.getUUID())) {
+            return false;
+        }
+
+        final TowRopeAttachment blockAttachment = this.getBlockAttachment();
+        if (blockAttachment == null) {
+            return false;
+        }
+
+        final AttachmentEndpoint anchorEndpoint = this.getResolvedBlockEndpoint(level, blockAttachment);
+        if (anchorEndpoint == null) {
+            return false;
+        }
+
+        final Vec3 towPoint = TowAnchorPoints.resolveEntityTowPoint(entity);
+        final Vec3 anchorPoint = this.projectEndpointOutOfSubLevel(level, anchorEndpoint);
+        final double distance = anchorPoint.distanceTo(towPoint);
+        final double tautStretch = Math.max(0.0, distance - this.getEntityFreeMovementDistance(profile));
+        return Math.max(tautStretch, this.blockedEntityPullDistance) > ACTIVE_TOW_EPSILON;
     }
 
     private void stopNavigation(final Mob mob) {

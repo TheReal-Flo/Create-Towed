@@ -150,12 +150,19 @@ public final class TowRopeSavedData extends SavedData {
     }
 
     public Vec3 constrainEntityMovement(final Entity entity, final Vec3 movement) {
-        Vec3 constrained = movement;
+        final List<ServerTowRope> matchingRopes = new ArrayList<>();
         for (final ServerTowRope rope : this.ropes.values()) {
-            if (!rope.matchesEntity(entity.getUUID())) {
-                continue;
+            if (rope.matchesEntity(entity.getUUID())) {
+                matchingRopes.add(rope);
             }
+        }
 
+        for (final ServerTowRope rope : matchingRopes) {
+            rope.recordEntityPullDemand(this.level, entity, movement);
+        }
+
+        Vec3 constrained = movement;
+        for (final ServerTowRope rope : matchingRopes) {
             constrained = rope.constrainEntityMovement(this.level, entity, constrained);
             if (constrained.lengthSqr() <= 1.0E-10) {
                 return Vec3.ZERO;
@@ -163,6 +170,16 @@ public final class TowRopeSavedData extends SavedData {
         }
 
         return constrained;
+    }
+
+    public int countActiveTowRopes(final Entity entity, final TowEntityProfile profile) {
+        int activeTowRopes = 0;
+        for (final ServerTowRope rope : this.ropes.values()) {
+            if (rope.hasActiveTowDemand(this.level, entity, profile)) {
+                activeTowRopes++;
+            }
+        }
+        return activeTowRopes;
     }
 
     public boolean hasBlockAttachment(final BlockPos blockPos) {
