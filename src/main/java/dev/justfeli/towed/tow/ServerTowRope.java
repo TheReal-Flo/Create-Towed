@@ -16,6 +16,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.ai.navigation.PathNavigation;
 import net.minecraft.world.level.material.FluidState;
@@ -47,6 +48,9 @@ public final class ServerTowRope extends RopePhysicsObject {
     private static final double CONTRAPTION_FREE_BREAKAWAY_MASS = 24.0;
     private static final double CONTRAPTION_BREAKAWAY_FORCE_SCALE = 0.11;
     private static final double ACTIVE_TOW_EPSILON = 1.0E-4;
+    private static final double MOUNTED_TOW_INPUT_THRESHOLD = 0.05;
+    private static final double MOUNTED_TAUT_PROXIMITY_THRESHOLD = 0.05;
+    private static final double MOUNTED_PULL_DEMAND_DISTANCE = 0.08;
 
     private final UUID ropeId;
     private final TowRopeAttachment startAttachment;
@@ -466,14 +470,9 @@ public final class ServerTowRope extends RopePhysicsObject {
         }
 
         final TowEntityProfile profile = TowEntityProfile.from(mob);
-        final double tautStretch = Math.max(0.0, distance - this.getEntityFreeMovementDistance(profile));
+        final double freeMovementDistance = this.getEntityFreeMovementDistance(profile);
+        final double tautStretch = Math.max(0.0, distance - freeMovementDistance);
         final double attemptedPullStretch = this.getBlockedEntityPullDistance();
-        final double towStretch = Math.max(tautStretch, attemptedPullStretch);
-        if (towStretch <= 0.0) {
-            this.resetEntityTowControl();
-            return;
-        }
-
         final Vec3 normalizedPull = pullVector.scale(1.0 / distance);
         final Vector3d ropeVelocity = Sable.HELPER.getVelocity(level, JOMLConversion.toJOML(anchorPoint), new Vector3d());
         final Vector3d entityVelocity = Sable.HELPER.getVelocity(level, JOMLConversion.toJOML(towPoint), new Vector3d());
@@ -484,8 +483,22 @@ public final class ServerTowRope extends RopePhysicsObject {
         final double surfaceFriction = this.resolveSurfaceFriction(level, mob, towPoint);
         final double horizontalPullFactor = Mth.clamp(Math.sqrt(normalizedPull.x * normalizedPull.x + normalizedPull.z * normalizedPull.z), 0.0, 1.0);
         final double ropeLoad = profile.ropeLoadForStretch(tautStretch, relativeSpeedAlongRope);
-        final boolean activelyPulling = attemptedPullStretch > 1.0E-4;
-        final double movementPullDemand = profile.desiredTowForceForBlockedMovement(attemptedPullStretch) * horizontalPullFactor;
+        final double mountedTowInput = this.getMountedTowInputStrength(mob);
+        final double syntheticMountedPullStretch =
+                distance >= freeMovementDistance - MOUNTED_TAUT_PROXIMITY_THRESHOLD
+                        && mountedTowInput > MOUNTED_TOW_INPUT_THRESHOLD
+                        && horizontalPullFactor > 0.1
+                        ? MOUNTED_PULL_DEMAND_DISTANCE * mountedTowInput
+                        : 0.0;
+        final double effectivePullStretch = Math.max(attemptedPullStretch, syntheticMountedPullStretch);
+        final double towStretch = Math.max(tautStretch, effectivePullStretch);
+        if (towStretch <= 0.0) {
+            this.resetEntityTowControl();
+            return;
+        }
+
+        final boolean activelyPulling = effectivePullStretch > ACTIVE_TOW_EPSILON;
+        final double movementPullDemand = profile.desiredTowForceForBlockedMovement(effectivePullStretch) * horizontalPullFactor;
         final double towDemand = activelyPulling ? Math.max(ropeLoad, movementPullDemand) : 0.0;
         final double contraptionRequiredForce = this.resolveContraptionRequiredForce(level, normalizedPull);
         this.lastContraptionRequiredForce = contraptionRequiredForce;
@@ -663,6 +676,14 @@ public final class ServerTowRope extends RopePhysicsObject {
 
     private double getBlockedEntityPullDistance() {
         return this.blockedEntityPullDistance;
+    }
+
+    private double getMountedTowInputStrength(final Mob mob) {
+        if (!(mob.getControllingPassenger() instanceof LivingEntity rider)) {
+            return 0.0;
+        }
+
+        return Mth.clamp(Math.sqrt(rider.xxa * rider.xxa + rider.zza * rider.zza), 0.0, 1.0);
     }
 
     public boolean hasActiveTowDemand(final ServerLevel level, final Entity entity, final TowEntityProfile profile) {

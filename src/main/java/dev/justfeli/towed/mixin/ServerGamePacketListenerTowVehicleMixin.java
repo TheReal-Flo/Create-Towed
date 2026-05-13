@@ -71,34 +71,21 @@ public abstract class ServerGamePacketListenerTowVehicleMixin {
             return;
         }
 
-        final TowRopeSavedData towData = TowRopeSavedData.get(serverLevel);
-        final Vec3 requestedMovement = new Vec3(targetX - xBeforeMove, targetY - yBeforeMove, targetZ - zBeforeMove);
-        final Vec3 constrainedMovement = towData.previewConstrainedEntityMovement(entity, requestedMovement);
-        final double constrainedTargetX = xBeforeMove + constrainedMovement.x;
-        final double constrainedTargetY = yBeforeMove + constrainedMovement.y;
-        final double constrainedTargetZ = zBeforeMove + constrainedMovement.z;
-
-        double moveDeltaX = constrainedTargetX - this.vehicleLastGoodX;
-        double moveDeltaY = constrainedTargetY - this.vehicleLastGoodY - 1.0E-6;
-        double moveDeltaZ = constrainedTargetZ - this.vehicleLastGoodZ;
+        double moveDeltaX = targetX - this.vehicleLastGoodX;
+        double moveDeltaY = targetY - this.vehicleLastGoodY - 1.0E-6;
+        double moveDeltaZ = targetZ - this.vehicleLastGoodZ;
 
         entity.move(MoverType.PLAYER, new Vec3(moveDeltaX, moveDeltaY, moveDeltaZ));
 
         final double movedDeltaY = moveDeltaY;
-        moveDeltaX = constrainedTargetX - entity.getX();
-        moveDeltaY = constrainedTargetY - entity.getY();
-        if (moveDeltaY > -0.5 && moveDeltaY < 0.5) {
-            moveDeltaY = 0.0;
-        }
+        final double acceptedX = entity.getX();
+        final double acceptedY = entity.getY();
+        final double acceptedZ = entity.getZ();
 
-        moveDeltaZ = constrainedTargetZ - entity.getZ();
-        final double residualDistanceSqr = moveDeltaX * moveDeltaX + moveDeltaY * moveDeltaY + moveDeltaZ * moveDeltaZ;
-        final boolean movedWrongly = residualDistanceSqr > 0.0625;
-
-        entity.absMoveTo(constrainedTargetX, constrainedTargetY, constrainedTargetZ, targetYRot, targetXRot);
+        entity.absMoveTo(acceptedX, acceptedY, acceptedZ, targetYRot, targetXRot);
         this.resyncPlayerWithVehicle(entity);
         final boolean endedWithoutCollision = serverLevel.noCollision(entity, entity.getBoundingBox().deflate(0.0625));
-        if (startedWithoutCollision && (movedWrongly || !endedWithoutCollision)) {
+        if (startedWithoutCollision && !endedWithoutCollision) {
             entity.absMoveTo(xBeforeMove, yBeforeMove, zBeforeMove, targetYRot, targetXRot);
             this.resyncPlayerWithVehicle(entity);
             this.player.connection.send(new ClientboundMoveVehiclePacket(entity));
@@ -107,7 +94,7 @@ public abstract class ServerGamePacketListenerTowVehicleMixin {
         }
 
         this.player.serverLevel().getChunkSource().move(this.player);
-        final Vec3 actualMovement = new Vec3(entity.getX() - xBeforeMove, entity.getY() - yBeforeMove, entity.getZ() - zBeforeMove);
+        final Vec3 actualMovement = new Vec3(acceptedX - xBeforeMove, acceptedY - yBeforeMove, acceptedZ - zBeforeMove);
         this.player.setKnownMovement(actualMovement);
         this.player.checkMovementStatistics(actualMovement.x, actualMovement.y, actualMovement.z);
         this.player.checkRidingStatistics(actualMovement.x, actualMovement.y, actualMovement.z);
