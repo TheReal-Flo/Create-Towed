@@ -150,6 +150,14 @@ public final class TowRopeSavedData extends SavedData {
     }
 
     public Vec3 constrainEntityMovement(final Entity entity, final Vec3 movement) {
+        return this.constrainEntityMovement(entity, movement, true);
+    }
+
+    public Vec3 previewConstrainedEntityMovement(final Entity entity, final Vec3 movement) {
+        return this.constrainEntityMovement(entity, movement, false);
+    }
+
+    private Vec3 constrainEntityMovement(final Entity entity, final Vec3 movement, final boolean recordPullDemand) {
         final List<ServerTowRope> matchingRopes = new ArrayList<>();
         for (final ServerTowRope rope : this.ropes.values()) {
             if (rope.matchesEntity(entity.getUUID())) {
@@ -157,8 +165,10 @@ public final class TowRopeSavedData extends SavedData {
             }
         }
 
-        for (final ServerTowRope rope : matchingRopes) {
-            rope.recordEntityPullDemand(this.level, entity, movement);
+        if (recordPullDemand) {
+            for (final ServerTowRope rope : matchingRopes) {
+                rope.recordEntityPullDemand(this.level, entity, movement);
+            }
         }
 
         Vec3 constrained = movement;

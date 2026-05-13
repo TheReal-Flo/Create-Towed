@@ -4,7 +4,8 @@
   "compatibilityLevel": "JAVA_21",
   "mixins": [
     "EntityTowMovementMixin",
-    "FollowOwnerGoalMixin"
+    "FollowOwnerGoalMixin",
+    "ServerGamePacketListenerTowVehicleMixin"
   ],
   "client": [
     "client.ClientSubLevelContainerTowRopeMixin"
